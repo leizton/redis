@@ -44,15 +44,22 @@ typedef char *sds;
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
  * However is here to document the layout of type 5 SDS strings. */
 struct __attribute__ ((__packed__)) sdshdr5 {
+    //= 低3个bit是type, 高5个bit是length
     unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
     char buf[];
 };
+
+//= __attribute__(( attr_list ))用于设置struct或union的属性
+//= ex: __attribute__(( aligned(8) ))按8字节对齐, 如果不加(8)则按目标机器(不是指实际运行机器)的cpu位数对齐
+//= packed使字段间更紧凑, 结构体所占空间更小
+//= hdr8: 用8个bit表示长度, hdr是header的缩写
 struct __attribute__ ((__packed__)) sdshdr8 {
-    uint8_t len; /* used */
-    uint8_t alloc; /* excluding the header and null terminator */
-    unsigned char flags; /* 3 lsb of type, 5 unused bits */
-    char buf[];
+    uint8_t len;
+    uint8_t alloc;        //= capacity, 不包括header and null terminator(字符串结尾的'\0')
+    unsigned char flags;  //= 低3个bit是type, 高5个bit未用
+    char buf[];           //= 不占空间
 };
+
 struct __attribute__ ((__packed__)) sdshdr16 {
     uint16_t len; /* used */
     uint16_t alloc; /* excluding the header and null terminator */
@@ -100,6 +107,7 @@ static inline size_t sdslen(const sds s) {
     return 0;
 }
 
+//= 剩余空间, alloc - len
 static inline size_t sdsavail(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -126,6 +134,7 @@ static inline size_t sdsavail(const sds s) {
     return 0;
 }
 
+//= 直接设置len字段, len = newlen
 static inline void sdssetlen(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {

@@ -91,12 +91,14 @@ sds sdsnewlen(const void *init, size_t initlen) {
     int hdrlen = sdsHdrSize(type);
     unsigned char *fp; /* flags pointer. */
 
-    sh = s_malloc(hdrlen+initlen+1);
-    if (!init)
-        memset(sh, 0, hdrlen+initlen+1);
+    //= header部分也是通过malloc()获得
+    sh = s_malloc(hdrlen+initlen+1);  //= sh是sds的header指针
+    if (init == NULL)
+        memset(sh, 0, hdrlen+initlen+1);  //= 未设置init字符串时, 初始化成0
     if (sh == NULL) return NULL;
     s = (char*)sh+hdrlen;
     fp = ((unsigned char*)s)-1;
+    //= 初始化header
     switch(type) {
         case SDS_TYPE_5: {
             *fp = type | (initlen << SDS_TYPE_BITS);
@@ -132,7 +134,7 @@ sds sdsnewlen(const void *init, size_t initlen) {
         }
     }
     if (initlen && init)
-        memcpy(s, init, initlen);
+        memcpy(s, init, initlen);  //= 用init初始化s
     s[initlen] = '\0';
     return s;
 }
@@ -204,8 +206,8 @@ sds sdsMakeRoomFor(sds s, size_t addlen) {
     /* Return ASAP if there is enough space left. */
     if (avail >= addlen) return s;
 
+    //= 增长策略
     len = sdslen(s);
-    sh = (char*)s-sdsHdrSize(oldtype);
     newlen = (len+addlen);
     if (newlen < SDS_MAX_PREALLOC)
         newlen *= 2;
@@ -219,6 +221,7 @@ sds sdsMakeRoomFor(sds s, size_t addlen) {
      * at every appending operation. */
     if (type == SDS_TYPE_5) type = SDS_TYPE_8;
 
+    sh = (char*)s-sdsHdrSize(oldtype);
     hdrlen = sdsHdrSize(type);
     if (oldtype==type) {
         newsh = s_realloc(sh, hdrlen+newlen+1);
@@ -276,11 +279,11 @@ sds sdsRemoveFreeSpace(sds s) {
  * 1) The sds header before the pointer.
  * 2) The string.
  * 3) The free buffer at the end if any.
- * 4) The implicit null term.
+ * 4) The implicit null term, '\0'.
  */
 size_t sdsAllocSize(sds s) {
     size_t alloc = sdsalloc(s);
-    return sdsHdrSize(s[-1])+alloc+1;
+    return sdsHdrSize(s[-1])+alloc+1;  //= +1是结尾的'\0'
 }
 
 /* Return the pointer of the actual SDS allocation (normally SDS strings
