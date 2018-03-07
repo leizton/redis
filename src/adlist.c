@@ -44,7 +44,7 @@ list *listCreate(void)
 
     if ((list = zmalloc(sizeof(*list))) == NULL)
         return NULL;
-    list->head = list->tail = NULL;
+    list->head = list->tail = NULL;  //= 初始时head和tail都是null
     list->len = 0;
     list->dup = NULL;
     list->free = NULL;
@@ -62,7 +62,7 @@ void listEmpty(list *list)
     len = list->len;
     while(len--) {
         next = current->next;
-        if (list->free) list->free(current->value);
+        if (list->free) list->free(current->value);  //= try to invoke user custom free()
         zfree(current);
         current = next;
     }
@@ -85,6 +85,7 @@ void listRelease(list *list)
  * On error, NULL is returned and no operation is performed (i.e. the
  * list remains unaltered).
  * On success the 'list' pointer you pass to the function is returned. */
+//= insert before head, become new head
 list *listAddNodeHead(list *list, void *value)
 {
     listNode *node;
@@ -111,6 +112,7 @@ list *listAddNodeHead(list *list, void *value)
  * On error, NULL is returned and no operation is performed (i.e. the
  * list remains unaltered).
  * On success the 'list' pointer you pass to the function is returned. */
+//= insert after tail, become new tail
 list *listAddNodeTail(list *list, void *value)
 {
     listNode *node;
@@ -131,6 +133,7 @@ list *listAddNodeTail(list *list, void *value)
     return list;
 }
 
+//= insert after or before old_node
 list *listInsertNode(list *list, listNode *old_node, void *value, int after) {
     listNode *node;
 
@@ -202,11 +205,13 @@ void listReleaseIterator(listIter *iter) {
 }
 
 /* Create an iterator in the list private iterator structure */
+//= rewind改变风向, iter跳到header, 并设成从header开始向前
 void listRewind(list *list, listIter *li) {
     li->next = list->head;
     li->direction = AL_START_HEAD;
 }
 
+//= rewind改变风向, iter跳到tail, 并设成从tail开始往后
 void listRewindTail(list *list, listIter *li) {
     li->next = list->tail;
     li->direction = AL_START_TAIL;
@@ -231,6 +236,7 @@ listNode *listNext(listIter *iter)
     listNode *current = iter->next;
 
     if (current != NULL) {
+        //= 修改下次迭代时应该访问的节点指针
         if (iter->direction == AL_START_HEAD)
             iter->next = current->next;
         else
@@ -326,7 +332,7 @@ listNode *listIndex(list *list, long index) {
     return n;
 }
 
-/* Rotate the list removing the tail node and inserting it to the head. */
+//= 把当前tail移到head前, 变成新head
 void listRotate(list *list) {
     listNode *tail = list->tail;
 
@@ -342,8 +348,7 @@ void listRotate(list *list) {
     list->head = tail;
 }
 
-/* Add all the elements of the list 'o' at the end of the
- * list 'l'. The list 'other' remains empty but otherwise valid. */
+//= 把 other append到 lst 的末尾, 并清空other
 void listJoin(list *l, list *o) {
     if (o->head)
         o->head->prev = l->tail;

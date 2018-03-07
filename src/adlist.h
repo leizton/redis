@@ -44,11 +44,17 @@ typedef struct listIter {
     int direction;
 } listIter;
 
+//= 双链表, 非循环链表
 typedef struct list {
     listNode *head;
     listNode *tail;
+
+    //= @ref listDup()
     void *(*dup)(void *ptr);
+    //= 释放node的value, @ref listDelNode()
     void (*free)(void *ptr);
+    //= 比较node的value和searchKey是否相等, @ref listSearchKey()
+    //= 实现时注意先比较(ptr==key),(ptr==NULL)和(key==NULL)
     int (*match)(void *ptr, void *key);
     unsigned long len;
 } list;
