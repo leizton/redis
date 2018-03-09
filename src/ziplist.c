@@ -13,8 +13,10 @@
  *
  * The general layout of the ziplist is as follows:
  *
- * <zlbytes> <zltail> <zllen> <entry> <entry> ... <entry> <zlend>
+ * //= zipl总size | 最后一个entry的段内指针 | entry个数 | entries    |  0xFF
+ * //=  <zlbytes>          <zltail>            <zllen>    <entry>...   <zlend>
  *
+ * //= 字段按小端存储
  * NOTE: all fields are stored in little endian, if not specified otherwise.
  *
  * <uint32_t zlbytes> is an unsigned integer to hold the number of bytes that
@@ -44,6 +46,7 @@
  * of strings it also represents the length of the string payload.
  * So a complete entry is stored like this:
  *
+ * //= 一个entry的3个字段
  * <prevlen> <encoding> <entry-data>
  *
  * Sometimes the encoding represents the entry itself, like for small integers
@@ -52,6 +55,7 @@
  *
  * <prevlen> <encoding>
  *
+ * //= entry-prevlen: 前一个entry的size, 相当于prev指针
  * The length of the previous entry, <prevlen>, is encoded in the following way:
  * If this length is smaller than 255 bytes, it will only consume a single
  * byte representing the length as an unsinged 8 bit integer. When the length
@@ -68,6 +72,7 @@
  *
  * 0xFF <4 bytes unsigned little endian prevlen> <encoding> <entry>
  *
+ * //= entry-encoding: 表示编码类型是string或int
  * The encoding field of the entry depends on the content of the
  * entry. When the entry is a string, the first 2 bits of the encoding first
  * byte will hold the type of encoding used to store the length of the string,
@@ -77,6 +82,7 @@
  * different types and encodings is as follows. The first byte is always enough
  * to determine the kind of entry.
  *
+ * //= string header
  * |00pppppp| - 1 byte
  *      String value with length less than or equal to 63 bytes (6 bits).
  *      "pppppp" represents the unsigned 6 bit length.
@@ -89,6 +95,7 @@
  *      up to 32^2-1. The 6 lower bits of the first byte are not used and
  *      are set to zero.
  *      IMPORTANT: The 32 bit number is stored in big endian.
+ * //= int header
  * |11000000| - 3 bytes
  *      Integer encoded as int16_t (2 bytes).
  * |11010000| - 5 bytes
@@ -105,6 +112,7 @@
  *      subtracted from the encoded 4 bit value to obtain the right value.
  * |11111111| - End of ziplist special entry.
  *
+ * //= 整数都是小端序
  * Like for the ziplist header, all the integers are represented in little
  * endian byte order, even when this code is compiled in big endian systems.
  *
@@ -336,14 +344,17 @@ unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, uns
         /* Although encoding is given it may not be set for strings,
          * so we determine it here using the raw length. */
         if (rawlen <= 0x3f) {
+            //= 00xx-xxxx
             if (!p) return len;
             buf[0] = ZIP_STR_06B | rawlen;
         } else if (rawlen <= 0x3fff) {
+            //= 01xx-xxxx
             len += 1;
             if (!p) return len;
             buf[0] = ZIP_STR_14B | ((rawlen >> 8) & 0x3f);
             buf[1] = rawlen & 0xff;
         } else {
+            //= 10xx-xxxx 
             len += 4;
             if (!p) return len;
             buf[0] = ZIP_STR_32B;
