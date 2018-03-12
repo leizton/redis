@@ -67,7 +67,7 @@ typedef struct dictType {
 /* This is our hash table structure. Every dictionary has two of this as we
  * implement incremental rehashing, for the old to the new table. */
 typedef struct dictht {
-    dictEntry **table;
+    dictEntry **table;  //= 每个元素是一个hash桶(dictEntry*)
     unsigned long size;
     unsigned long sizemask;
     unsigned long used;
@@ -76,8 +76,8 @@ typedef struct dictht {
 typedef struct dict {
     dictType *type;
     void *privdata;
-    dictht ht[2];
-    long rehashidx; /* rehashing not in progress if rehashidx == -1 */
+    dictht ht[2];  //= 两个hashTable
+    long rehashidx; //= old_hashTable(ht[0])里将要rehash的桶的索引, 等于-1时不在rehashing
     unsigned long iterators; /* number of iterators currently running */
 } dict;
 
@@ -150,7 +150,7 @@ typedef void (dictScanBucketFunction)(void *privdata, dictEntry **bucketref);
 /* API */
 dict *dictCreate(dictType *type, void *privDataPtr);
 int dictExpand(dict *d, unsigned long size);
-int dictAdd(dict *d, void *key, void *val);
+int dictAdd(dict *d, void *key, void *val);                       //= put(k,v)
 dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing);
 dictEntry *dictAddOrFind(dict *d, void *key);
 int dictReplace(dict *d, void *key, void *val);

@@ -65,8 +65,13 @@ static unsigned int dict_force_resize_ratio = 5;
 /* -------------------------- private prototypes ---------------------------- */
 
 static int _dictExpandIfNeeded(dict *ht);
+
+//= hashTable的容量是2的幂次
 static unsigned long _dictNextPower(unsigned long size);
+
+//= if key存在返回-1, 并让existing指向entry; else 返回hash桶索引
 static int _dictKeyIndex(dict *ht, const void *key, unsigned int hash, dictEntry **existing);
+
 static int _dictInit(dict *ht, dictType *type, void *privDataPtr);
 
 /* -------------------------- hash functions -------------------------------- */
@@ -185,48 +190,48 @@ int dictExpand(dict *d, unsigned long size)
  * guaranteed that this function will rehash even a single bucket, since it
  * will visit at max N*10 empty buckets in total, otherwise the amount of
  * work it does would be unbound and the function may block for a long time. */
+//= 最多rehash n个桶
+//= 返回0, 表示已完成rehash; 返回1, 表示未完成rehash
 int dictRehash(dict *d, int n) {
     int empty_visits = n*10; /* Max number of empty buckets to visit. */
     if (!dictIsRehashing(d)) return 0;
 
     while(n-- && d->ht[0].used != 0) {
-        dictEntry *de, *nextde;
+        dictEntry *de;
 
-        /* Note that rehashidx can't overflow as we are sure there are more
-         * elements because ht[0].used != 0 */
+        /* Note that rehashidx can't overflow as we are sure there are more elements because ht[0].used != 0 */
+        //= rehashidx是old_hashTable里将要rehash的桶的索引
         assert(d->ht[0].size > (unsigned long)d->rehashidx);
         while(d->ht[0].table[d->rehashidx] == NULL) {
             d->rehashidx++;
             if (--empty_visits == 0) return 1;
         }
         de = d->ht[0].table[d->rehashidx];
-        /* Move all the keys in this bucket from the old to the new hash HT */
-        while(de) {
-            unsigned int h;
 
-            nextde = de->next;
-            /* Get the index in the new hash table */
+        //= 对桶de做rehash
+        unsigned int h;
+        for(; de; de=de->next) {
+            //= dictHashKey()用dictType::hashFunction()实现
             h = dictHashKey(d, de->key) & d->ht[1].sizemask;
+
             de->next = d->ht[1].table[h];
             d->ht[1].table[h] = de;
+
             d->ht[0].used--;
             d->ht[1].used++;
-            de = nextde;
         }
         d->ht[0].table[d->rehashidx] = NULL;
         d->rehashidx++;
     }
 
-    /* Check if we already rehashed the whole table... */
     if (d->ht[0].used == 0) {
+        //= rehash完成后释放ht[0]
         zfree(d->ht[0].table);
         d->ht[0] = d->ht[1];
         _dictReset(&d->ht[1]);
         d->rehashidx = -1;
         return 0;
     }
-
-    /* More to rehash... */
     return 1;
 }
 
@@ -265,8 +270,8 @@ static void _dictRehashStep(dict *d) {
 int dictAdd(dict *d, void *key, void *val)
 {
     dictEntry *entry = dictAddRaw(d,key,NULL);
-
     if (!entry) return DICT_ERR;
+
     dictSetVal(d, entry, val);
     return DICT_OK;
 }
@@ -297,17 +302,19 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
 
     if (dictIsRehashing(d)) _dictRehashStep(d);
 
-    /* Get the index of the new element, or -1 if
-     * the element already exists. */
     if ((index = _dictKeyIndex(d, key, dictHashKey(d,key), existing)) == -1)
-        return NULL;
+        return NULL;  //= key已存在
 
     /* Allocate the memory and store the new entry.
      * Insert the element in top, with the assumption that in a database
      * system it is more likely that recently added entries are accessed
      * more frequently. */
+
+    //= if in rehashing, 放到new_hashTable(ht[1])中
     ht = dictIsRehashing(d) ? &d->ht[1] : &d->ht[0];
     entry = zmalloc(sizeof(*entry));
+
+    //= 插入到桶的header处, 假设越近添加的元素越容易被访问到
     entry->next = ht->table[index];
     ht->table[index] = entry;
     ht->used++;
@@ -562,7 +569,7 @@ dictIterator *dictGetSafeIterator(dict *d) {
 dictEntry *dictNext(dictIterator *iter)
 {
     while (1) {
-        if (iter->entry == NULL) {
+        if (iter->entry == NULL) {  //= 需要跳到下一个hash桶上
             dictht *ht = &iter->d->ht[iter->table];
             if (iter->index == -1 && iter->table == 0) {
                 if (iter->safe)
@@ -570,19 +577,20 @@ dictEntry *dictNext(dictIterator *iter)
                 else
                     iter->fingerprint = dictFingerprint(iter->d);
             }
-            iter->index++;
+            iter->index++;  //= 跳到下一个hash桶
             if (iter->index >= (long) ht->size) {
                 if (dictIsRehashing(iter->d) && iter->table == 0) {
+                    //= 跳到table[1]
                     iter->table++;
                     iter->index = 0;
                     ht = &iter->d->ht[1];
                 } else {
-                    break;
+                    return NULL;
                 }
             }
             iter->entry = ht->table[iter->index];
         } else {
-            iter->entry = iter->nextEntry;
+            iter->entry = iter->nextEntry;  //= 在同一个hash桶内, 跳到下一个entry
         }
         if (iter->entry) {
             /* We need to save the 'next' here, the iterator user
@@ -955,6 +963,7 @@ static unsigned long _dictNextPower(unsigned long size)
  *
  * Note that if we are in the process of rehashing the hash table, the
  * index is always returned in the context of the second (new) hash table. */
+//= if key already exists, return -1; else return bucket's idx
 static int _dictKeyIndex(dict *d, const void *key, unsigned int hash, dictEntry **existing)
 {
     unsigned int idx, table;
@@ -970,12 +979,13 @@ static int _dictKeyIndex(dict *d, const void *key, unsigned int hash, dictEntry 
         he = d->ht[table].table[idx];
         while(he) {
             if (key==he->key || dictCompareKeys(d, key, he->key)) {
+                //= 已存在这个key, 返回所在的entry
                 if (existing) *existing = he;
                 return -1;
             }
             he = he->next;
         }
-        if (!dictIsRehashing(d)) break;
+        if (!dictIsRehashing(d)) break;  //= 如果正在rehash, 则继续在d->ht[1]里找
     }
     return idx;
 }
