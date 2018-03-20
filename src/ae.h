@@ -58,7 +58,7 @@ struct aeEventLoop;
 
 /* Types and data structures */
 typedef void aeFileProc(struct aeEventLoop *eventLoop, int fd, void *clientData, int mask);
-typedef int aeTimeProc(struct aeEventLoop *eventLoop, long long id, void *clientData);
+typedef int aeTimeProc(struct aeEventLoop *eventLoop, long long id, void *clientData);  //= 返回值是下次aeCreateTimeEvent()的milliseconds参数
 typedef void aeEventFinalizerProc(struct aeEventLoop *eventLoop, void *clientData);
 typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
 
@@ -98,8 +98,8 @@ typedef struct aeEventLoop {
     aeTimeEvent *timeEventHead;
     int stop;
     void *apidata; /* This is used for polling API specific data */
-    aeBeforeSleepProc *beforesleep;
-    aeBeforeSleepProc *aftersleep;
+    aeBeforeSleepProc *beforesleep;  //= @ref server.c::main()最后面设置成server.c::beforeSleep()
+    aeBeforeSleepProc *aftersleep;   //= server.c::afterSleep()
 } aeEventLoop;
 
 /* Prototypes */

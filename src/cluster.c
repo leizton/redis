@@ -414,8 +414,7 @@ void clusterInit(void) {
     server.cluster->size = 1;
     server.cluster->todo_before_sleep = 0;
     server.cluster->nodes = dictCreate(&clusterNodesDictType,NULL);
-    server.cluster->nodes_black_list =
-        dictCreate(&clusterNodesBlackListDictType,NULL);
+    server.cluster->nodes_black_list = dictCreate(&clusterNodesBlackListDictType,NULL);
     server.cluster->failover_auth_time = 0;
     server.cluster->failover_auth_count = 0;
     server.cluster->failover_auth_rank = 0;
@@ -463,19 +462,13 @@ void clusterInit(void) {
         exit(1);
     }
 
-    if (listenToPort(server.port+CLUSTER_PORT_INCR,
-        server.cfd,&server.cfd_count) == C_ERR)
-    {
+    //= 监听cluster的端口, 并注册accept事件
+    if (listenToPort(server.port+CLUSTER_PORT_INCR, server.cfd, &server.cfd_count) == C_ERR) {
         exit(1);
-    } else {
-        int j;
-
-        for (j = 0; j < server.cfd_count; j++) {
-            if (aeCreateFileEvent(server.el, server.cfd[j], AE_READABLE,
-                clusterAcceptHandler, NULL) == AE_ERR)
-                    serverPanic("Unrecoverable error creating Redis Cluster "
-                                "file event.");
-        }
+    }
+    for (int j = 0; j < server.cfd_count; j++) {
+        if (aeCreateFileEvent(server.el, server.cfd[j], AE_READABLE, clusterAcceptHandler, NULL) == AE_ERR)
+            serverPanic("Unrecoverable error creating Redis Cluster file event.");
     }
 
     /* The slots -> keys map is a radix tree. Initialize it here. */
