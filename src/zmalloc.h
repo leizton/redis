@@ -35,6 +35,8 @@
 #define __xstr(s) __str(s)
 #define __str(s) #s
 
+#define USE_JEMALLOC 1
+
 #if defined(USE_TCMALLOC)
 #define ZMALLOC_LIB ("tcmalloc-" __xstr(TC_VERSION_MAJOR) "." __xstr(TC_VERSION_MINOR))
 #include <google/tcmalloc.h>

@@ -78,6 +78,7 @@ static int _dictInit(dict *ht, dictType *type, void *privDataPtr);
 
 static uint8_t dict_hash_function_seed[16];
 
+//= server.c的main()里调用, 初始化hash种子
 void dictSetHashFunctionSeed(uint8_t *seed) {
     memcpy(dict_hash_function_seed,seed,sizeof(dict_hash_function_seed));
 }
@@ -225,7 +226,7 @@ int dictRehash(dict *d, int n) {
     }
 
     if (d->ht[0].used == 0) {
-        //= rehash完成后释放ht[0]
+        //= rehash完成后释放ht[0], ht[0]设成ht[1], 重置ht[1], rehashidx设成-1
         zfree(d->ht[0].table);
         d->ht[0] = d->ht[1];
         _dictReset(&d->ht[1]);

@@ -76,7 +76,7 @@ typedef struct dictht {
 typedef struct dict {
     dictType *type;
     void *privdata;
-    dictht ht[2];  //= 两个hashTable
+    dictht ht[2];  //= 两个hashTable, ht[1]是rehashing时的新表
     long rehashidx; //= old_hashTable(ht[0])里将要rehash的桶的索引, 等于-1时不在rehashing
     unsigned long iterators; /* number of iterators currently running */
 } dict;

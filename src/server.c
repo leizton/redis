@@ -3508,8 +3508,7 @@ void setupSignalHandlers(void) {
 
 void memtest(size_t megabytes, int passes);
 
-/* Returns 1 if there is --sentinel among the arguments or if
- * argv[0] contains "redis-sentinel". */
+//= if argv里有redis-sentinel或--sentinel, return 1; else return 0
 int checkForSentinelMode(int argc, char **argv) {
     int j;
 
@@ -3672,6 +3671,7 @@ int redisIsSupervised(int mode) {
 }
 
 
+//= the entry point
 int main(int argc, char **argv) {
     struct timeval tv;
     int j;
@@ -3704,9 +3704,9 @@ int main(int argc, char **argv) {
 
     /* We need to initialize our libraries, and the server configuration. */
 #ifdef INIT_SETPROCTITLE_REPLACEMENT
-    spt_init(argc, argv);
+    spt_init(argc, argv);  //= 修改进程名称
 #endif
-    setlocale(LC_COLLATE,"");
+    setlocale(LC_COLLATE,"");  //= locale设成""表示使用运行环境的配置
     zmalloc_set_oom_handler(redisOutOfMemoryHandler);
     srand(time(NULL)^getpid());
     gettimeofday(&tv,NULL);
@@ -3720,7 +3720,7 @@ int main(int argc, char **argv) {
     /* Store the executable path and arguments in a safe place in order
      * to be able to restart the server later. */
     server.executable = getAbsolutePath(argv[0]);
-    server.exec_argv = zmalloc(sizeof(char*)*(argc+1));
+    server.exec_argv = zmalloc(sizeof(char*) * (argc+1));
     server.exec_argv[argc] = NULL;
     for (j = 0; j < argc; j++) server.exec_argv[j] = zstrdup(argv[j]);
 

@@ -45,6 +45,7 @@ void zlibc_free(void *ptr) {
 #include "zmalloc.h"
 #include "atomicvar.h"
 
+//= 使用tcmalloc jemalloc __APPLE__, 都#define了HAVE_MALLOC_SIZE, @ref zmalloc.h
 #ifdef HAVE_MALLOC_SIZE
 #define PREFIX_SIZE (0)
 #else
@@ -70,9 +71,12 @@ void zlibc_free(void *ptr) {
 #define dallocx(ptr,flags) je_dallocx(ptr,flags)
 #endif
 
+//= n被补齐到cpu字长(sizeof(long))的整数倍
+//= malloc(ptmalloc)/tcmalloc/jemalloc都是按cpu字长整数倍分配
 #define update_zmalloc_stat_alloc(__n) do { \
     size_t _n = (__n); \
-    if (_n&(sizeof(long)-1)) _n += sizeof(long)-(_n&(sizeof(long)-1)); \
+    if (_n&(sizeof(long)-1)) \
+        _n += sizeof(long)-(_n&(sizeof(long)-1)); \
     atomicIncr(used_memory,__n); \
 } while(0)
 
@@ -86,8 +90,7 @@ static size_t used_memory = 0;
 pthread_mutex_t used_memory_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void zmalloc_default_oom(size_t size) {
-    fprintf(stderr, "zmalloc: Out of memory trying to allocate %zu bytes\n",
-        size);
+    fprintf(stderr, "zmalloc: Out of memory trying to allocate %zu bytes\n", size);
     fflush(stderr);
     abort();
 }
@@ -96,8 +99,8 @@ static void (*zmalloc_oom_handler)(size_t) = zmalloc_default_oom;
 
 void *zmalloc(size_t size) {
     void *ptr = malloc(size+PREFIX_SIZE);
+    if (!ptr) zmalloc_oom_handler(size);  //= 分配失败
 
-    if (!ptr) zmalloc_oom_handler(size);
 #ifdef HAVE_MALLOC_SIZE
     update_zmalloc_stat_alloc(zmalloc_size(ptr));
     return ptr;
@@ -108,8 +111,8 @@ void *zmalloc(size_t size) {
 #endif
 }
 
-/* Allocation and free functions that bypass the thread cache
- * and go straight to the allocator arena bins.
+//= 跳过thread-cache, 直接在arena分配
+/* Allocation and free functions that bypass the thread cache and go straight to the allocator arena bins.
  * Currently implemented only for jemalloc. Used for online defragmentation. */
 #ifdef HAVE_DEFRAG
 void *zmalloc_no_tcache(size_t size) {
