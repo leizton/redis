@@ -93,19 +93,19 @@ typedef struct aeEventLoop {
     int maxfd;   // fd's current max
     int setsize; // fd's max limit
 
-    long long timeEventNextId;
-    time_t lastTime;     /* Used to detect system clock skew */
+    long long timeEventNextId;  // 每个新的timeEvent都从此处获得新id, @ref ae.c::aeCreateTimeEvent()
+    time_t lastTime;  // Used to detect system clock skew, @ref ae.c::processTimeEvents()
 
-    aeFileEvent *events;  // 创建时直接申请了一个setsize大小的数组(连续内存)
-    aeFiredEvent *fired;  // 同上创建时是一个setsize大小的数组, @ref ae_epoll.c::aeApiPoll()
+    aeFileEvent*  events;  // 创建时直接申请了一个setsize大小的数组(连续内存)
+    aeFiredEvent* fired;   // 同上创建时是一个setsize大小的数组, @ref ae_epoll.c::aeApiPoll()
+    aeTimeEvent*  timeEventHead;  // timeEvents单链表的头节点, 初始值是NULL, ae.c::aeCreateTimeEvent()里做头插法
 
-    aeTimeEvent *timeEventHead;
     int stop;  // 在aeMain()里判断eventloop是否在运行
 
-    void *apidata;  // ae_epoll.c
+    void* apidata;  // ae_epoll.c
 
-    aeBeforeSleepProc *beforesleep;  //= @ref server.c::main()最后面设置成server.c::beforeSleep()
-    aeBeforeSleepProc *aftersleep;   //= server.c::afterSleep()
+    aeBeforeSleepProc* beforesleep;  //= @ref server.c::main()最后面设置成server.c::beforeSleep()
+    aeBeforeSleepProc* aftersleep;   //= server.c::afterSleep()
 } aeEventLoop;
 
 /* Prototypes */

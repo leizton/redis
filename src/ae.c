@@ -44,8 +44,9 @@
 #include "zmalloc.h"
 #include "config.h"
 
-/* Include the best multiplexing layer supported by this system.
- * The following should be ordered by performances, descending. */
+
+//== 和eventLoop有关
+
 //= 选择eventLoop的实现
 #ifdef HAVE_EVPORT
 #include "ae_evport.c"
@@ -94,6 +95,44 @@ err:
     return NULL;
 }
 
+int aeGetSetSize(aeEventLoop *eventLoop) {
+    return eventLoop->setsize;
+}
+
+//= 修改eventLoop的setsize
+int aeResizeSetSize(aeEventLoop *eventLoop, int setsize) {
+    if (setsize == eventLoop->setsize) return AE_OK;
+    if (eventLoop->maxfd >= setsize) return AE_ERR;
+    if (aeApiResize(eventLoop,setsize) == -1) return AE_ERR;
+
+    eventLoop->events = zrealloc(eventLoop->events,sizeof(aeFileEvent)*setsize);
+    eventLoop->fired = zrealloc(eventLoop->fired,sizeof(aeFiredEvent)*setsize);
+    eventLoop->setsize = setsize;
+
+    for (int i = eventLoop->maxfd+1; i < setsize; i++)
+        eventLoop->events[i].mask = AE_NONE;
+    return AE_OK;
+}
+
+void aeDeleteEventLoop(aeEventLoop *eventLoop) {
+    aeApiFree(eventLoop);
+    zfree(eventLoop->events);
+    zfree(eventLoop->fired);
+    zfree(eventLoop);
+}
+
+void aeStop(aeEventLoop *eventLoop) {
+    eventLoop->stop = 1;
+}
+
+//= 获取eventLoop的具体实现
+char *aeGetApiName(void) {
+    return aeApiName();
+}
+
+
+//== 和fileEvent有关的函数
+
 //= 添加FileEvent事件
 //= mask: 控制proc是否可用于读或写处理
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask, aeFileProc *proc, void *clientData)
@@ -140,13 +179,21 @@ void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int delmask)
     }
 }
 
+int aeGetFileEvents(aeEventLoop *evloop, int fd) {
+    return fd < evloop->setsize ? evloop->events[fd].mask : AE_NONE;
+}
+
+
+//== 和timeEvent有关的函数
+
 //= 在milliseconds毫秒后执行
 long long aeCreateTimeEvent(aeEventLoop *eventLoop, long long milliseconds,
-        aeTimeProc *proc, void *clientData, aeEventFinalizerProc *finalizerProc) {
+                            aeTimeProc *proc, void *clientData,
+                            aeEventFinalizerProc *finalizerProc) {
     aeTimeEvent *te = zmalloc(sizeof(*te));
     if (te == NULL) return AE_ERR;
 
-    te->id = eventLoop->timeEventNextId++;;
+    te->id = eventLoop->timeEventNextId++;
     te->timeProc = proc;
     te->finalizerProc = finalizerProc;
     te->clientData = clientData;
@@ -158,6 +205,7 @@ long long aeCreateTimeEvent(aeEventLoop *eventLoop, long long milliseconds,
     return id;
 }
 
+//= 根据id删除timeEvent
 int aeDeleteTimeEvent(aeEventLoop *eventLoop, long long id) {
     aeTimeEvent *te = eventLoop->timeEventHead;
     while(te) {
@@ -167,40 +215,26 @@ int aeDeleteTimeEvent(aeEventLoop *eventLoop, long long id) {
         }
         te = te->next;
     }
-    return AE_ERR; /* NO event with the specified ID found */
+    return AE_ERR;
 }
 
-/* Search the first timer to fire.
- * This operation is useful to know how many time the select can be
- * put in sleep without to delay any event.
- * If there are no timers NULL is returned.
- *
- * Note that's O(N) since time events are unsorted.
- * Possible optimizations (not needed by Redis so far, but...):
- * 1) Insert the event in order, so that the nearest is just the head.
- *    Much better but still insertion or deletion of timers is O(N).
- * 2) Use a skiplist to have this operation as O(1) and insertion as O(log(N)).
- */
+//= 查找接下来最近触发的timeEvent, O(n)时间复杂度
 static aeTimeEvent *aeSearchNearestTimer(aeEventLoop *eventLoop) {
     aeTimeEvent *te = eventLoop->timeEventHead;
     aeTimeEvent *nearest = NULL;
 
     while(te) {
         if (!nearest || te->when_sec < nearest->when_sec ||
-                (te->when_sec == nearest->when_sec &&
-                 te->when_ms < nearest->when_ms))
+                (te->when_sec == nearest->when_sec && te->when_ms < nearest->when_ms))
             nearest = te;
         te = te->next;
     }
     return nearest;
 }
 
-/* Process time events */
+//= process time events
 static int processTimeEvents(aeEventLoop *eventLoop) {
-    int processed = 0;
-    aeTimeEvent *te, *prev;
-    long long maxId;
-    time_t now = time(NULL);
+    aeTimeEvent *te;
 
     /* If the system clock is moved to the future, and then set back to the
      * right value, time events may be delayed in a random way. Often this
@@ -210,6 +244,7 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
      * events to be processed ASAP when this happens: the idea is that
      * processing events earlier is less dangerous than delaying them
      * indefinitely, and practice suggests it is. */
+    time_t now = time(NULL);
     if (now < eventLoop->lastTime) {
         te = eventLoop->timeEventHead;
         while(te) {
@@ -219,22 +254,23 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
     }
     eventLoop->lastTime = now;
 
-    prev = NULL;
+    int processed = 0;
+    long long maxId = eventLoop->timeEventNextId-1;
+    aeTimeEvent *prev = NULL;
     te = eventLoop->timeEventHead;
-    maxId = eventLoop->timeEventNextId-1;
     while(te) {
-        long now_sec, now_ms;
-        long long id;
-
-        /* Remove events scheduled for deletion. */
         if (te->id == AE_DELETED_EVENT_ID) {
+            // te was deleted in aeDeleteTimeEvent()
             aeTimeEvent *next = te->next;
-            if (prev == NULL)
+            if (prev == NULL) {
+                // te is head
                 eventLoop->timeEventHead = te->next;
-            else
-                prev->next = te->next;
-            if (te->finalizerProc)
+            } else {
+                prev->next = te->next;  // remove te direct
+            }
+            if (te->finalizerProc) {
                 te->finalizerProc(eventLoop, te->clientData);
+            }
             zfree(te);
             te = next;
             continue;
@@ -249,26 +285,28 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
             te = te->next;
             continue;
         }
-        aeGetTime(&now_sec, &now_ms);
-        if (now_sec > te->when_sec ||
-            (now_sec == te->when_sec && now_ms >= te->when_ms))
-        {
-            int retval;
 
-            id = te->id;
-            retval = te->timeProc(eventLoop, id, te->clientData);
-            processed++;
-            if (retval != AE_NOMORE) {
-                aeAddMillisecondsToNow(retval,&te->when_sec,&te->when_ms);
-            } else {
+        long now_sec, now_ms;
+        aeGetTime(&now_sec, &now_ms);
+        if (now_sec > te->when_sec || (now_sec == te->when_sec && now_ms >= te->when_ms)) {
+            int retval = te->timeProc(eventLoop, te->id, te->clientData);
+            if (retval == AE_NOMORE) {
                 te->id = AE_DELETED_EVENT_ID;
+            } else {
+                // 过了retval毫秒后te再次触发
+                aeAddMillisecondsToNow(retval, &te->when_sec, &te->when_ms);
             }
+            processed++;
         }
+
         prev = te;
         te = te->next;
     }
     return processed;
 }
+
+
+//== handle eventLoop
 
 //= return: 事件处理的个数
 int aeProcessEvents(aeEventLoop *eventLoop, int flags) {
@@ -366,41 +404,7 @@ void aeSetAfterSleepProc(aeEventLoop *eventLoop, aeBeforeSleepProc *aftersleep) 
 }
 
 
-//= util
-
-int aeGetSetSize(aeEventLoop *eventLoop) {
-    return eventLoop->setsize;
-}
-
-//= 修改eventLoop的setsize
-int aeResizeSetSize(aeEventLoop *eventLoop, int setsize) {
-    if (setsize == eventLoop->setsize) return AE_OK;
-    if (eventLoop->maxfd >= setsize) return AE_ERR;
-    if (aeApiResize(eventLoop,setsize) == -1) return AE_ERR;
-
-    eventLoop->events = zrealloc(eventLoop->events,sizeof(aeFileEvent)*setsize);
-    eventLoop->fired = zrealloc(eventLoop->fired,sizeof(aeFiredEvent)*setsize);
-    eventLoop->setsize = setsize;
-
-    for (int i = eventLoop->maxfd+1; i < setsize; i++)
-        eventLoop->events[i].mask = AE_NONE;
-    return AE_OK;
-}
-
-void aeDeleteEventLoop(aeEventLoop *eventLoop) {
-    aeApiFree(eventLoop);
-    zfree(eventLoop->events);
-    zfree(eventLoop->fired);
-    zfree(eventLoop);
-}
-
-void aeStop(aeEventLoop *eventLoop) {
-    eventLoop->stop = 1;
-}
-
-int aeGetFileEvents(aeEventLoop *evloop, int fd) {
-    return fd < evloop->setsize ? evloop->events[fd].mask : AE_NONE;
-}
+//== util
 
 //= 等待fd的writable/readable/exception, 直到超时
 //= 通过系统调用poll()实现
@@ -424,10 +428,6 @@ int aeWait(int fd, int mask, long long milliseconds) {
     }
 }
 
-char *aeGetApiName(void) {
-    return aeApiName();
-}
-
 //= 获取系统当前时间
 static void aeGetTime(long *seconds, long *milliseconds)
 {
@@ -437,13 +437,13 @@ static void aeGetTime(long *seconds, long *milliseconds)
     *milliseconds = tv.tv_usec/1000;
 }
 
-//= 获取当前时间加上milliseconds的时间
+//= 获取当前时间加上milliseconds的时间, 结果保存到sec和ms上
 static void aeAddMillisecondsToNow(long long milliseconds, long *sec, long *ms) {
-    long cur_sec, cur_ms, when_sec, when_ms;
-
+    long cur_sec, cur_ms;
     aeGetTime(&cur_sec, &cur_ms);
-    when_sec = cur_sec + milliseconds/1000;
-    when_ms = cur_ms + milliseconds%1000;
+
+    long when_sec = cur_sec + milliseconds/1000;
+    long when_ms = cur_ms + milliseconds%1000;
     if (when_ms >= 1000) {
         when_sec ++;
         when_ms -= 1000;
