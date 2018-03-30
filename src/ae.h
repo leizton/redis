@@ -64,7 +64,7 @@ typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
 
 /* File event structure */
 typedef struct aeFileEvent {
-    int mask; /* one of AE_(READABLE|WRITABLE) */
+    int mask;  // 取值 AE_READABLE/AE_WRITABLE
     aeFileProc *rfileProc;
     aeFileProc *wfileProc;
     void *clientData;
@@ -97,7 +97,7 @@ typedef struct aeEventLoop {
     time_t lastTime;     /* Used to detect system clock skew */
 
     aeFileEvent *events;  // 创建时直接申请了一个setsize大小的数组(连续内存)
-    aeFiredEvent *fired;  // 同上, 创建时是一个setsize大小的数组
+    aeFiredEvent *fired;  // 同上创建时是一个setsize大小的数组, @ref ae_epoll.c::aeApiPoll()
 
     aeTimeEvent *timeEventHead;
     int stop;  // 在aeMain()里判断eventloop是否在运行

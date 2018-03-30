@@ -101,27 +101,27 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int delmask) {
 
 static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     aeApiState *state = eventLoop->apidata;
-    int retval, numevents = 0;
+    int timeout = tvp ? (tvp->tv_sec*1000 + tvp->tv_usec/1000) : -1;
 
-    retval = epoll_wait(state->epfd,state->events,eventLoop->setsize,
-            tvp ? (tvp->tv_sec*1000 + tvp->tv_usec/1000) : -1);
-    if (retval > 0) {
-        int j;
+    int eventNum = epoll_wait(state->epfd, state->events, eventLoop->setsize, timeout);
 
-        numevents = retval;
-        for (j = 0; j < numevents; j++) {
+    if (eventNum > 0) {
+        for (int i = 0; i < eventNum; i++) {
+            struct epoll_event *e = state->events + i;
             int mask = 0;
-            struct epoll_event *e = state->events+j;
 
-            if (e->events & EPOLLIN) mask |= AE_READABLE;
+            if (e->events & EPOLLIN)  mask |= AE_READABLE;
             if (e->events & EPOLLOUT) mask |= AE_WRITABLE;
             if (e->events & EPOLLERR) mask |= AE_WRITABLE;
             if (e->events & EPOLLHUP) mask |= AE_WRITABLE;
+
             eventLoop->fired[j].fd = e->data.fd;
             eventLoop->fired[j].mask = mask;
         }
+        return eventNum;
+    } else {
+        return 0;
     }
-    return numevents;
 }
 
 static char *aeApiName(void) {
