@@ -1816,7 +1816,7 @@ void initServer(void) {
         exit(1);
     }
 
-    //= server.port
+    //= 监听server.port
     /* Open the TCP listening socket for the user commands. */
     if (server.port != 0 && listenToPort(server.port,server.ipfd,&server.ipfd_count) == C_ERR)
         exit(1);
@@ -1824,8 +1824,7 @@ void initServer(void) {
     /* Open the listening Unix domain socket. */
     if (server.unixsocket != NULL) {
         unlink(server.unixsocket); /* don't care if this fails */
-        server.sofd = anetUnixServer(server.neterr,server.unixsocket,
-            server.unixsocketperm, server.tcp_backlog);
+        server.sofd = anetUnixServer(server.neterr,server.unixsocket,server.unixsocketperm, server.tcp_backlog);
         if (server.sofd == ANET_ERR) {
             serverLog(LL_WARNING, "Opening Unix socket: %s", server.neterr);
             exit(1);
@@ -1893,7 +1892,7 @@ void initServer(void) {
         exit(1);
     }
 
-    //= 注册accept事件:acceptTcpHandler
+    //= 注册accept事件:acceptTcpHandler(networking.c)
     for (j = 0; j < server.ipfd_count; j++) {
         if (aeCreateFileEvent(server.el, server.ipfd[j], AE_READABLE, acceptTcpHandler, NULL) == AE_ERR)
             serverPanic("Unrecoverable error creating server.ipfd file event.");

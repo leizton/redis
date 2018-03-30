@@ -87,17 +87,23 @@ typedef struct aeFiredEvent {
     int mask;
 } aeFiredEvent;
 
-/* State of an event based program */
+//= aeEventLoop
+//= aeCreateEventLoop()里创建aeEventLoop结构体
 typedef struct aeEventLoop {
-    int maxfd;   /* highest file descriptor currently registered */
-    int setsize; /* max number of file descriptors tracked */
+    int maxfd;   // fd's current max
+    int setsize; // fd's max limit
+
     long long timeEventNextId;
     time_t lastTime;     /* Used to detect system clock skew */
-    aeFileEvent *events; /* Registered events */
-    aeFiredEvent *fired; /* Fired events */
+
+    aeFileEvent *events;  // 创建时直接申请了一个setsize大小的数组(连续内存)
+    aeFiredEvent *fired;  // 同上, 创建时是一个setsize大小的数组
+
     aeTimeEvent *timeEventHead;
-    int stop;
-    void *apidata; /* This is used for polling API specific data */
+    int stop;  // 在aeMain()里判断eventloop是否在运行
+
+    void *apidata;  // ae_epoll.c
+
     aeBeforeSleepProc *beforesleep;  //= @ref server.c::main()最后面设置成server.c::beforeSleep()
     aeBeforeSleepProc *aftersleep;   //= server.c::afterSleep()
 } aeEventLoop;

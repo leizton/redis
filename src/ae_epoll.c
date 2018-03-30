@@ -38,26 +38,27 @@ typedef struct aeApiState {
 
 static int aeApiCreate(aeEventLoop *eventLoop) {
     aeApiState *state = zmalloc(sizeof(aeApiState));
+    if (state == NULL) goto err;
 
-    if (!state) return -1;
     state->events = zmalloc(sizeof(struct epoll_event)*eventLoop->setsize);
-    if (!state->events) {
-        zfree(state);
-        return -1;
-    }
-    state->epfd = epoll_create(1024); /* 1024 is just a hint for the kernel */
-    if (state->epfd == -1) {
-        zfree(state->events);
-        zfree(state);
-        return -1;
-    }
+    if (state->events == NULL) goto err;
+
+    state->epfd = epoll_create(1024); // 1024 is just a hint for the kernel
+    if (state->epfd == -1) goto err;
+
     eventLoop->apidata = state;
     return 0;
+
+err:
+    if (state) {
+        zfree(state->events);
+        zfree(state);
+    }
+    return -1;
 }
 
 static int aeApiResize(aeEventLoop *eventLoop, int setsize) {
     aeApiState *state = eventLoop->apidata;
-
     state->events = zrealloc(state->events, sizeof(struct epoll_event)*setsize);
     return 0;
 }
@@ -71,38 +72,31 @@ static void aeApiFree(aeEventLoop *eventLoop) {
 }
 
 static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
-    aeApiState *state = eventLoop->apidata;
-    struct epoll_event ee = {0}; /* avoid valgrind warning */
-    /* If the fd was already monitored for some event, we need a MOD
-     * operation. Otherwise we need an ADD operation. */
-    int op = eventLoop->events[fd].mask == AE_NONE ?
-            EPOLL_CTL_ADD : EPOLL_CTL_MOD;
+    //= 如果fd已经关联了其他事件(mask != AE_NONE), 则operation应该是MOD
+    int op = eventLoop->events[fd].mask == AE_NONE ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
+    mask |= eventLoop->events[fd].mask;  // Merge old events
 
+    struct epoll_event ee = {0};
     ee.events = 0;
-    mask |= eventLoop->events[fd].mask; /* Merge old events */
     if (mask & AE_READABLE) ee.events |= EPOLLIN;
     if (mask & AE_WRITABLE) ee.events |= EPOLLOUT;
     ee.data.fd = fd;
-    if (epoll_ctl(state->epfd,op,fd,&ee) == -1) return -1;
-    return 0;
+
+    //= epoll_ctl()
+    return epoll_ctl(eventLoop->apidata->epfd, op, fd, &ee);
 }
 
 static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int delmask) {
-    aeApiState *state = eventLoop->apidata;
-    struct epoll_event ee = {0}; /* avoid valgrind warning */
-    int mask = eventLoop->events[fd].mask & (~delmask);
+    int newmask = eventLoop->events[fd].mask & (~delmask);
+    int op = newmask == AE_NONE ? EPOLL_CTL_DEL : EPOLL_CTL_MOD;
 
+    struct epoll_event ee = {0};
     ee.events = 0;
-    if (mask & AE_READABLE) ee.events |= EPOLLIN;
-    if (mask & AE_WRITABLE) ee.events |= EPOLLOUT;
+    if (newmask & AE_READABLE) ee.events |= EPOLLIN;
+    if (newmask & AE_WRITABLE) ee.events |= EPOLLOUT;
     ee.data.fd = fd;
-    if (mask != AE_NONE) {
-        epoll_ctl(state->epfd,EPOLL_CTL_MOD,fd,&ee);
-    } else {
-        /* Note, Kernel < 2.6.9 requires a non null event pointer even for
-         * EPOLL_CTL_DEL. */
-        epoll_ctl(state->epfd,EPOLL_CTL_DEL,fd,&ee);
-    }
+
+    epoll_ctl(eventLoop->apidata->epfd, op, fd, &ee);
 }
 
 static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {

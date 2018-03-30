@@ -27,6 +27,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#define __linux__ 1
+#undef __APPLE__
+
 #ifndef __CONFIG_H
 #define __CONFIG_H
 

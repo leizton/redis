@@ -46,6 +46,7 @@
 
 /* Include the best multiplexing layer supported by this system.
  * The following should be ordered by performances, descending. */
+//= 选择eventLoop的实现
 #ifdef HAVE_EVPORT
 #include "ae_evport.c"
 #else
@@ -62,12 +63,9 @@
 
 aeEventLoop *aeCreateEventLoop(int setsize) {
     aeEventLoop *eventLoop;
-    int i;
-
     if ((eventLoop = zmalloc(sizeof(*eventLoop))) == NULL) goto err;
-    eventLoop->events = zmalloc(sizeof(aeFileEvent)*setsize);
-    eventLoop->fired = zmalloc(sizeof(aeFiredEvent)*setsize);
-    if (eventLoop->events == NULL || eventLoop->fired == NULL) goto err;
+    if ((eventLoop->events = zmalloc(sizeof(aeFileEvent)*setsize)) == NULL) goto err;
+    if ((eventLoop->fired = zmalloc(sizeof(aeFiredEvent)*setsize)) == NULL) goto err;
     eventLoop->setsize = setsize;
     eventLoop->lastTime = time(NULL);
     eventLoop->timeEventHead = NULL;
@@ -76,11 +74,15 @@ aeEventLoop *aeCreateEventLoop(int setsize) {
     eventLoop->maxfd = -1;
     eventLoop->beforesleep = NULL;
     eventLoop->aftersleep = NULL;
+
+    //= init eventLoop.apidata
     if (aeApiCreate(eventLoop) == -1) goto err;
-    /* Events with mask == AE_NONE are not set. So let's initialize the
-     * vector with it. */
-    for (i = 0; i < setsize; i++)
+
+    // 把eventLoop->events的每个event.mask置AE_NONE
+    for (int i = 0; i < setsize; i++) {
         eventLoop->events[i].mask = AE_NONE;
+    }
+
     return eventLoop;
 
 err:
@@ -133,55 +135,60 @@ void aeStop(aeEventLoop *eventLoop) {
     eventLoop->stop = 1;
 }
 
+//= 添加FileEvent事件
+//= mask: 控制proc是否可用于读或写处理
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask, aeFileProc *proc, void *clientData)
 {
     if (fd >= eventLoop->setsize) {
         errno = ERANGE;
         return AE_ERR;
     }
-    aeFileEvent *fe = &eventLoop->events[fd];
 
-    if (aeApiAddEvent(eventLoop, fd, mask) == -1)
+    // ->epoll_ctl()
+    if (aeApiAddEvent(eventLoop, fd, mask) == -1) {
         return AE_ERR;
+    }
+
+    // 修改eventLoop->events[fd]
+    aeFileEvent *fe = &eventLoop->events[fd];
     fe->mask |= mask;
     if (mask & AE_READABLE) fe->rfileProc = proc;
     if (mask & AE_WRITABLE) fe->wfileProc = proc;
     fe->clientData = clientData;
-    if (fd > eventLoop->maxfd)
-        eventLoop->maxfd = fd;
+    if (fd > eventLoop->maxfd) eventLoop->maxfd = fd;
     return AE_OK;
 }
 
-void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask)
+//= 删除FileEvent事件
+void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int delmask)
 {
     if (fd >= eventLoop->setsize) return;
     aeFileEvent *fe = &eventLoop->events[fd];
     if (fe->mask == AE_NONE) return;
 
-    aeApiDelEvent(eventLoop, fd, mask);
-    fe->mask = fe->mask & (~mask);
-    if (fd == eventLoop->maxfd && fe->mask == AE_NONE) {
-        /* Update the max fd */
-        int j;
+    // ->epoll_ctl()
+    aeApiDelEvent(eventLoop, fd, delmask);
 
-        for (j = eventLoop->maxfd-1; j >= 0; j--)
-            if (eventLoop->events[j].mask != AE_NONE) break;
-        eventLoop->maxfd = j;
+    fe->mask = fe->mask & (~delmask);
+    if (fe->mask == AE_NONE && fd == eventLoop->maxfd) {
+        // update eventLoop->maxfd
+        for (int i = eventLoop->maxfd-1; i >= 0; i--) {
+            if (eventLoop->events[i].mask != AE_NONE) {
+                eventLoop->maxfd = i;
+                break;
+            }
+        }
     }
 }
 
-int aeGetFileEvents(aeEventLoop *eventLoop, int fd) {
-    if (fd >= eventLoop->setsize) return 0;
-    aeFileEvent *fe = &eventLoop->events[fd];
-
-    return fe->mask;
+int aeGetFileEvents(aeEventLoop *evloop, int fd) {
+    return fd < evloop->setsize ? evloop->events[fd].mask : AE_NONE;
 }
 
 //= 获取系统当前时间
 static void aeGetTime(long *seconds, long *milliseconds)
 {
     struct timeval tv;
-
     gettimeofday(&tv, NULL);
     *seconds = tv.tv_sec;
     *milliseconds = tv.tv_usec/1000;
