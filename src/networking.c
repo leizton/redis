@@ -67,6 +67,7 @@ int listMatchObjects(void *a, void *b) {
     return equalStringObjects(a,b);
 }
 
+//= 创建新的client连接
 client *createClient(int fd) {
     client *c = zmalloc(sizeof(client));
 
@@ -79,9 +80,10 @@ client *createClient(int fd) {
         anetEnableTcpNoDelay(NULL,fd);
         if (server.tcpkeepalive)
             anetKeepAlive(NULL,fd,server.tcpkeepalive);
-        if (aeCreateFileEvent(server.el,fd,AE_READABLE,
-            readQueryFromClient, c) == AE_ERR)
-        {
+
+        //= ae.c::aeCreateFileEvent()
+        //= fileEvent.rfileProc: readQueryFromClient()
+        if (aeCreateFileEvent(server.el,fd,AE_READABLE,readQueryFromClient,c) == AE_ERR) {
             close(fd);
             zfree(c);
             return NULL;
@@ -602,6 +604,8 @@ int clientHasPendingReplies(client *c) {
 }
 
 #define MAX_ACCEPTS_PER_CALL 1000
+
+//= acceptHandler()主要是调用createClient(client_fd)
 static void acceptCommonHandler(int fd, int flags, char *ip) {
     client *c;
     if ((c = createClient(fd)) == NULL) {
@@ -615,7 +619,7 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
      * connection. Note that we create the client instead to check before
      * for this condition, since now the socket is already set in non-blocking
      * mode and we can send an error for free using the Kernel I/O */
-    if (listLength(server.clients) > server.maxclients) {
+    if (listLength(server.clients) > server.maxclients) {  // maxclients默认值10000
         char *err = "-ERR max number of clients reached\r\n";
 
         /* That's a best effort error message, don't check write errors */
@@ -673,22 +677,22 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
 }
 
 void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
-    int cport, cfd, max = MAX_ACCEPTS_PER_CALL;
-    char cip[NET_IP_STR_LEN];
     UNUSED(el);
     UNUSED(mask);
     UNUSED(privdata);
 
+    int cport, cfd;
+    char cip[NET_IP_STR_LEN];
+    int max = MAX_ACCEPTS_PER_CALL;  // 一次acceptTcpHandler()调用里最多accept的次数
     while(max--) {
         cfd = anetTcpAccept(server.neterr, fd, cip, sizeof(cip), &cport);
         if (cfd == ANET_ERR) {
             if (errno != EWOULDBLOCK)
-                serverLog(LL_WARNING,
-                    "Accepting client connection: %s", server.neterr);
+                serverLog(LL_WARNING, "Accepting client connection: %s", server.neterr);
             return;
         }
-        serverLog(LL_VERBOSE,"Accepted %s:%d", cip, cport);
-        acceptCommonHandler(cfd,0,cip);
+        serverLog(LL_VERBOSE, "Accepted %s:%d", cip, cport);
+        acceptCommonHandler(cfd, 0, cip);
     }
 }
 
@@ -1044,15 +1048,8 @@ void resetClient(client *c) {
  * a protocol error: in such a case the client structure is setup to reply
  * with the error and close the connection. */
 int processInlineBuffer(client *c) {
-    char *newline;
-    int argc, j;
-    sds *argv, aux;
-    size_t querylen;
-
-    /* Search for end of line */
-    newline = strchr(c->querybuf,'\n');
-
-    /* Nothing to do without a \r\n */
+    //= 命令行分割符, \n或\r\n
+    char* newline = strchr(c->querybuf,'\n');
     if (newline == NULL) {
         if (sdslen(c->querybuf) > PROTO_INLINE_MAX_SIZE) {
             addReplyError(c,"Protocol error: too big inline request");
@@ -1060,15 +1057,14 @@ int processInlineBuffer(client *c) {
         }
         return C_ERR;
     }
-
-    /* Handle the \r\n case. */
     if (newline && newline != c->querybuf && *(newline-1) == '\r')
-        newline--;
+        newline--;  // newline指向\n或\r\n
 
-    /* Split the input buffer up to the \r\n */
-    querylen = newline-(c->querybuf);
-    aux = sdsnewlen(c->querybuf,querylen);
-    argv = sdssplitargs(aux,&argc);
+    //= 从c->querybuf[0:querylen]解析出(int argc, char** argv)
+    size_t querylen = newline - (c->querybuf);
+    sds aux = sdsnewlen(c->querybuf, querylen);
+    int argc;
+    sds* argv = sdssplitargs(aux, &argc);
     sdsfree(aux);
     if (argv == NULL) {
         addReplyError(c,"Protocol error: unbalanced quotes in request");
@@ -1076,25 +1072,25 @@ int processInlineBuffer(client *c) {
         return C_ERR;
     }
 
-    /* Newline from slaves can be used to refresh the last ACK time.
-     * This is useful for a slave to ping back while loading a big
-     * RDB file. */
-    if (querylen == 0 && c->flags & CLIENT_SLAVE)
+    //= 空命令, 用于更新slave的ack-time, 在slave下载大的RDB文件时用作ping-back
+    if (querylen == 0 && (c->flags & CLIENT_SLAVE))
         c->repl_ack_time = server.unixtime;
 
-    /* Leave data after the first line of the query in the buffer */
-    sdsrange(c->querybuf,querylen+2,-1);
+    sdsrange(c->querybuf, querylen+2, -1);  // 移除newline前面那部分
 
-    /* Setup argv array on client structure */
-    if (argc) {
-        if (c->argv) zfree(c->argv);
-        c->argv = zmalloc(sizeof(robj*)*argc);
+    if (argc == 0) {
+        zfree(argv);
+        return C_OK;
     }
 
-    /* Create redis objects for all arguments. */
-    for (c->argc = 0, j = 0; j < argc; j++) {
+    //= 把(argc, argv)复制到client里
+    if (c->argv) zfree(c->argv);  // 移除c里旧的argv
+    c->argc = 0;
+    c->argv = zmalloc(sizeof(robj*)*argc);
+    for (int j = 0; j < argc; j++) {
         if (sdslen(argv[j])) {
-            c->argv[c->argc] = createObject(OBJ_STRING,argv[j]);
+            // @ref object.c::createObject()
+            c->argv[c->argc] = createObject(OBJ_STRING, argv[j]);
             c->argc++;
         } else {
             sdsfree(argv[j]);
@@ -1284,12 +1280,12 @@ int processMultibulkBuffer(client *c) {
     return C_ERR;
 }
 
-/* This function is called every time, in the client structure 'c', there is
- * more query buffer to process, because we read more data from the socket
- * or because a client was blocked and later reactivated, so there could be
- * pending query buffer, already representing a full command, to process. */
+//= 处理client的请求
+//= 1 解析命令 processInlineBuffer()和processMultibulkBuffer()
+//= 2 处理命令 server.c::processCommand()
 void processInputBuffer(client *c) {
     server.current_client = c;
+
     /* Keep processing while there is something in the input buffer */
     while(sdslen(c->querybuf)) {
         /* Return if clients are paused. */
@@ -1314,6 +1310,7 @@ void processInputBuffer(client *c) {
             }
         }
 
+        //= 从client.querybuf里解析出(int argc, char** argv), 并放到client.argc和client.argv
         if (c->reqtype == PROTO_REQ_INLINE) {
             if (processInlineBuffer(c) != C_OK) break;
         } else if (c->reqtype == PROTO_REQ_MULTIBULK) {
@@ -1322,14 +1319,15 @@ void processInputBuffer(client *c) {
             serverPanic("Unknown request type");
         }
 
-        /* Multibulk processing could see a <= 0 length. */
         if (c->argc == 0) {
+            //= processInline/Multibulk()没有解析出命令, 直接reset
             resetClient(c);
         } else {
-            /* Only reset the client when the command was executed. */
+            //= @ref server.c::processCommand()
             if (processCommand(c) == C_OK) {
                 if (c->flags & CLIENT_MASTER && !(c->flags & CLIENT_MULTI)) {
-                    /* Update the applied replication offset of our master. */
+                    // 更新master的replication_offset
+                    // @ref readQueryFromClient()的applied
                     c->reploff = c->read_reploff - sdslen(c->querybuf);
                 }
 
@@ -1337,8 +1335,11 @@ void processInputBuffer(client *c) {
                  * module blocking command, so that the reply callback will
                  * still be able to access the client argv and argc field.
                  * The client will be reset in unblockClientFromModule(). */
-                if (!(c->flags & CLIENT_BLOCKED) || c->btype != BLOCKED_MODULE)
+                if ((c->flags & CLIENT_BLOCKED) && c->btype == BLOCKED_MODULE) {
+                    //
+                } else {
                     resetClient(c);
+                }
             }
             /* freeMemoryIfNeeded may flush slave output buffers. This may
              * result into a slave, that may be the active client, to be
@@ -1346,62 +1347,56 @@ void processInputBuffer(client *c) {
             if (server.current_client == NULL) break;
         }
     }
+
     server.current_client = NULL;
 }
 
+//= client的rfileProc
 void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
-    client *c = (client*) privdata;
-    int nread, readlen;
-    size_t qblen;
     UNUSED(el);
     UNUSED(mask);
+    client *c = (client*) privdata;
 
-    readlen = PROTO_IOBUF_LEN;
-    /* If this is a multi bulk request, and we are processing a bulk reply
-     * that is large enough, try to maximize the probability that the query
-     * buffer contains exactly the SDS string representing the object, even
-     * at the risk of requiring more read(2) calls. This way the function
-     * processMultiBulkBuffer() can avoid copying buffers to create the
-     * Redis Object representing the argument. */
+    // multi bulk request
+    int readlen = PROTO_IOBUF_LEN;
     if (c->reqtype == PROTO_REQ_MULTIBULK && c->multibulklen && c->bulklen != -1
-        && c->bulklen >= PROTO_MBULK_BIG_ARG)
-    {
-        int remaining = (unsigned)(c->bulklen+2)-sdslen(c->querybuf);
-
-        if (remaining < readlen) readlen = remaining;
+            && c->bulklen >= PROTO_MBULK_BIG_ARG) {
+        int remaining = (unsigned)(c->bulklen+2) - sdslen(c->querybuf);
+        if (remaining < readlen) {
+            readlen = remaining;
+        }
     }
 
-    qblen = sdslen(c->querybuf);
+    size_t qblen = sdslen(c->querybuf);
     if (c->querybuf_peak < qblen) c->querybuf_peak = qblen;
     c->querybuf = sdsMakeRoomFor(c->querybuf, readlen);
-    nread = read(fd, c->querybuf+qblen, readlen);
+
+    // read to client.querybuf
+    int nread = read(fd, c->querybuf+qblen, readlen);
     if (nread == -1) {
-        if (errno == EAGAIN) {
-            return;
-        } else {
-            serverLog(LL_VERBOSE, "Reading from client: %s",strerror(errno));
+        //= if errno==EAGAIN, 表示当前没有可读的数据, 下次再尝试读
+        //= else free(client)
+        if (errno != EAGAIN) {
+            serverLog(LL_VERBOSE, "Reading from client: %s", strerror(errno));
             freeClient(c);
-            return;
         }
+        return;
     } else if (nread == 0) {
+        //= client closed, 和前面的EAGIN不同
         serverLog(LL_VERBOSE, "Client closed connection");
         freeClient(c);
         return;
     } else if (c->flags & CLIENT_MASTER) {
-        /* Append the query buffer to the pending (not applied) buffer
-         * of the master. We'll use this buffer later in order to have a
-         * copy of the string applied by the last command executed. */
-        c->pending_querybuf = sdscatlen(c->pending_querybuf,
-                                        c->querybuf+qblen,nread);
+        c->pending_querybuf = sdscatlen(c->pending_querybuf, c->querybuf+qblen, nread);
+        c->read_reploff += nread;
     }
 
-    sdsIncrLen(c->querybuf,nread);
-    c->lastinteraction = server.unixtime;
-    if (c->flags & CLIENT_MASTER) c->read_reploff += nread;
+    sdsIncrLen(c->querybuf, nread);
     server.stat_net_input_bytes += nread;
+    c->lastinteraction = server.unixtime;
+
     if (sdslen(c->querybuf) > server.client_max_querybuf_len) {
         sds ci = catClientInfoString(sdsempty(),c), bytes = sdsempty();
-
         bytes = sdscatrepr(bytes,c->querybuf,64);
         serverLog(LL_WARNING,"Closing client that reached max query buffer length: %s (qbuf initial bytes: %s)", ci, bytes);
         sdsfree(ci);
@@ -1410,23 +1405,17 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         return;
     }
 
-    /* Time to process the buffer. If the client is a master we need to
-     * compute the difference between the applied offset before and after
-     * processing the buffer, to understand how much of the replication stream
-     * was actually applied to the master state: this quantity, and its
-     * corresponding part of the replication stream, will be propagated to
-     * the sub-slaves and to the replication backlog. */
-    if (!(c->flags & CLIENT_MASTER)) {
-        processInputBuffer(c);
-    } else {
+    //= processInputBuffer(client)
+    if (c->flags & CLIENT_MASTER) {
         size_t prev_offset = c->reploff;
         processInputBuffer(c);
         size_t applied = c->reploff - prev_offset;
         if (applied) {
-            replicationFeedSlavesFromMasterStream(server.slaves,
-                    c->pending_querybuf, applied);
+            replicationFeedSlavesFromMasterStream(server.slaves, c->pending_querybuf, applied);
             sdsrange(c->pending_querybuf,applied,-1);
         }
+    } else {
+        processInputBuffer(c);
     }
 }
 

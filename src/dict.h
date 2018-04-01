@@ -66,6 +66,7 @@ typedef struct dictType {
 
 /* This is our hash table structure. Every dictionary has two of this as we
  * implement incremental rehashing, for the old to the new table. */
+//= 拉链法, @ref dict.c::dictFind()
 typedef struct dictht {
     dictEntry **table;  //= 每个元素是一个hash桶(dictEntry*)
     unsigned long size;
@@ -77,7 +78,7 @@ typedef struct dict {
     dictType *type;
     void *privdata;
     dictht ht[2];  //= 两个hashTable, ht[1]是rehashing时的新表
-    long rehashidx; //= old_hashTable(ht[0])里将要rehash的桶的索引, 等于-1时不在rehashing
+    long rehashidx; //= old_hashTable(ht[0])里将要rehash的桶的索引, 等于-1时不在rehashing[@ref dictIsRehashing()]
     unsigned long iterators; /* number of iterators currently running */
 } dict;
 

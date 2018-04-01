@@ -483,15 +483,16 @@ void dictRelease(dict *d)
 
 dictEntry *dictFind(dict *d, const void *key)
 {
-    dictEntry *he;
-    unsigned int h, idx, table;
+    if (d->ht[0].used + d->ht[1].used == 0)
+        return NULL;  //= d:dict* is empty
 
-    if (d->ht[0].used + d->ht[1].used == 0) return NULL; /* dict is empty */
-    if (dictIsRehashing(d)) _dictRehashStep(d);
-    h = dictHashKey(d, key);
-    for (table = 0; table <= 1; table++) {
-        idx = h & d->ht[table].sizemask;
-        he = d->ht[table].table[idx];
+    if (dictIsRehashing(d))
+        _dictRehashStep(d);
+
+    uint h = dictHashKey(d, key);
+    for (uint tableI = 0; tableI <= 1; tableI++) {
+        uint idx = h & d->ht[tableI].sizemask;
+        dictEntry* he = d->ht[tableI].table[idx];
         while(he) {
             if (key==he->key || dictCompareKeys(d, key, he->key))
                 return he;

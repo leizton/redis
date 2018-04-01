@@ -124,6 +124,7 @@ volatile unsigned long lru_clock; /* Server global current LRU time. */
  *    Note that commands that may trigger a DEL as a side effect (like SET)
  *    are not fast commands.
  */
+//= redis command table
 struct redisCommand redisCommandTable[] = {
     {"module",moduleCommand,-2,"as",0,NULL,1,1,1,0,0},
     {"get",getCommand,2,"rF",0,NULL,1,1,1,0,0},
@@ -1492,12 +1493,12 @@ void initServerConfig(void) {
     R_NegInf = -1.0/R_Zero;
     R_Nan = R_Zero/R_Zero;
 
-    /* Command table -- we initiialize it here as it is part of the
-     * initial configuration, since command names may be changed via
-     * redis.conf using the rename-command directive. */
+    //= 初始化 command dict table
+    //= search 'dictAdd(server.commands'
     server.commands = dictCreate(&commandTableDictType,NULL);
     server.orig_commands = dictCreate(&commandTableDictType,NULL);
     populateCommandTable();
+
     server.delCommand = lookupCommandByCString("del");
     server.multiCommand = lookupCommandByCString("multi");
     server.lpushCommand = lookupCommandByCString("lpush");
@@ -1939,10 +1940,8 @@ void initServer(void) {
 /* Populates the Redis Command Table starting from the hard coded list
  * we have on top of redis.c file. */
 void populateCommandTable(void) {
-    int j;
     int numcommands = sizeof(redisCommandTable)/sizeof(struct redisCommand);
-
-    for (j = 0; j < numcommands; j++) {
+    for (int j = 0; j < numcommands; j++) {
         struct redisCommand *c = redisCommandTable+j;
         char *f = c->sflags;
         int retval1, retval2;
@@ -2029,6 +2028,7 @@ void redisOpArrayFree(redisOpArray *oa) {
 
 /* ====================== Commands lookup and execution ===================== */
 
+//= 查找命令执行器
 struct redisCommand *lookupCommand(sds name) {
     return dictFetchValue(server.commands, name);
 }
@@ -2166,16 +2166,13 @@ void preventCommandReplication(client *c) {
  * preventCommandReplication(client *c);
  *
  */
+//= 调用命令的执行函数
 void call(client *c, int flags) {
-    long long dirty, start, duration;
     int client_old_flags = c->flags;
 
     /* Sent the command to clients in MONITOR mode, only if the commands are
      * not generated from reading an AOF. */
-    if (listLength(server.monitors) &&
-        !server.loading &&
-        !(c->cmd->flags & (CMD_SKIP_MONITOR|CMD_ADMIN)))
-    {
+    if (listLength(server.monitors) && !server.loading && !(c->cmd->flags & (CMD_SKIP_MONITOR|CMD_ADMIN))) {
         replicationFeedMonitors(c,server.monitors,c->db->id,c->argv,c->argc);
     }
 
@@ -2185,12 +2182,12 @@ void call(client *c, int flags) {
     redisOpArray prev_also_propagate = server.also_propagate;
     redisOpArrayInit(&server.also_propagate);
 
-    /* Call the command. */
-    dirty = server.dirty;
-    start = ustime();
-    c->cmd->proc(c);
-    duration = ustime()-start;
-    dirty = server.dirty-dirty;
+    //= 调用命令的执行函数
+    long long dirty = server.dirty;
+    long long start = ustime();
+    c->cmd->proc(c);  //= @ref server.h "struct redisCommand", 命令表redisCommandTable
+    long long duration = ustime()-start;
+    dirty = server.dirty - dirty;
     if (dirty < 0) dirty = 0;
 
     /* When EVAL is called loading the AOF we don't want commands called
@@ -2222,9 +2219,7 @@ void call(client *c, int flags) {
     }
 
     /* Propagate the command into the AOF and replication link */
-    if (flags & CMD_CALL_PROPAGATE &&
-        (c->flags & CLIENT_PREVENT_PROP) != CLIENT_PREVENT_PROP)
-    {
+    if (flags & CMD_CALL_PROPAGATE && (c->flags & CLIENT_PREVENT_PROP) != CLIENT_PREVENT_PROP) {
         int propagate_flags = PROPAGATE_NONE;
 
         /* Check if the command operated changes in the data set. If so
@@ -2252,11 +2247,9 @@ void call(client *c, int flags) {
             propagate(c->cmd,c->db->id,c->argv,c->argc,propagate_flags);
     }
 
-    /* Restore the old replication flags, since call() can be executed
-     * recursively. */
+    /* Restore the old replication flags, since call() can be executed recursively. */
     c->flags &= ~(CLIENT_FORCE_AOF|CLIENT_FORCE_REPL|CLIENT_PREVENT_PROP);
-    c->flags |= client_old_flags &
-        (CLIENT_FORCE_AOF|CLIENT_FORCE_REPL|CLIENT_PREVENT_PROP);
+    c->flags |= client_old_flags & (CLIENT_FORCE_AOF|CLIENT_FORCE_REPL|CLIENT_PREVENT_PROP);
 
     /* Handle the alsoPropagate() API to handle commands that want to propagate
      * multiple separated commands. Note that alsoPropagate() is not affected
@@ -2282,44 +2275,32 @@ void call(client *c, int flags) {
     server.stat_numcommands++;
 }
 
-/* If this function gets called we already read a whole
- * command, arguments are in the client argv/argc fields.
- * processCommand() execute the command or prepare the
- * server for a bulk read from the client.
- *
- * If C_OK is returned the client is still alive and valid and
- * other operations can be performed by the caller. Otherwise
- * if C_ERR is returned the client was destroyed (i.e. after QUIT). */
+//= 处理命令, 实际调用 server.c::call() 执行命令, 该函数主要进行边界检查
 int processCommand(client *c) {
-    /* The QUIT command is handled separately. Normal command procs will
-     * go through checking for replication and QUIT will cause trouble
-     * when FORCE_REPLICATION is enabled and would be implemented in
-     * a regular command proc. */
-    if (!strcasecmp(c->argv[0]->ptr,"quit")) {
+    //= 判断是否是quit命令
+    if (strcasecmp(c->argv[0]->ptr,"quit") == 0) {
         addReply(c,shared.ok);
         c->flags |= CLIENT_CLOSE_AFTER_REPLY;
         return C_ERR;
     }
 
-    /* Now lookup the command and check ASAP about trivial error conditions
-     * such as wrong arity, bad command name and so forth. */
+    //= 从server.commands中查找命令
     c->cmd = c->lastcmd = lookupCommand(c->argv[0]->ptr);
-    if (!c->cmd) {
+    if (c->cmd == NULL) {
         flagTransaction(c);
-        addReplyErrorFormat(c,"unknown command '%s'",
-            (char*)c->argv[0]->ptr);
-        return C_OK;
-    } else if ((c->cmd->arity > 0 && c->cmd->arity != c->argc) ||
-               (c->argc < -c->cmd->arity)) {
-        flagTransaction(c);
-        addReplyErrorFormat(c,"wrong number of arguments for '%s' command",
-            c->cmd->name);
+        addReplyErrorFormat(c,"unknown command '%s'",(char*)c->argv[0]->ptr);
         return C_OK;
     }
 
-    /* Check if the user is authenticated */
-    if (server.requirepass && !c->authenticated && c->cmd->proc != authCommand)
-    {
+    //= 检查参数个数是否合法
+    if ((c->cmd->arity > 0 && c->cmd->arity != c->argc) || (c->argc < -c->cmd->arity)) {
+        flagTransaction(c);
+        addReplyErrorFormat(c,"wrong number of arguments for '%s' command",c->cmd->name);
+        return C_OK;
+    }
+
+    //= 检查client是否有权限
+    if (server.requirepass /*密码*/ && !c->authenticated && c->cmd->proc != authCommand) {
         flagTransaction(c);
         addReply(c,shared.noautherr);
         return C_OK;
@@ -2329,17 +2310,14 @@ int processCommand(client *c) {
      * However we don't perform the redirection if:
      * 1) The sender of this command is our master.
      * 2) The command has no key arguments. */
-    if (server.cluster_enabled &&
-        !(c->flags & CLIENT_MASTER) &&
-        !(c->flags & CLIENT_LUA &&
-          server.lua_caller->flags & CLIENT_MASTER) &&
-        !(c->cmd->getkeys_proc == NULL && c->cmd->firstkey == 0 &&
-          c->cmd->proc != execCommand))
+    if (server.cluster_enabled
+        && !(c->flags & CLIENT_MASTER)
+        && !(c->flags & CLIENT_LUA) && server.lua_caller->flags & CLIENT_MASTER)
+        && (c->cmd->getkeys_proc != NULL || c->cmd->firstkey != 0 || c->cmd->proc == execCommand))
     {
         int hashslot;
         int error_code;
-        clusterNode *n = getNodeByQuery(c,c->cmd,c->argv,c->argc,
-                                        &hashslot,&error_code);
+        clusterNode *n = getNodeByQuery(c,c->cmd,c->argv,c->argc,&hashslot,&error_code);
         if (n == NULL || n != server.cluster->myself) {
             if (c->cmd->proc == execCommand) {
                 discardTransaction(c);
@@ -2351,49 +2329,41 @@ int processCommand(client *c) {
         }
     }
 
-    /* Handle the maxmemory directive.
-     *
-     * First we try to free some memory if possible (if there are volatile
-     * keys in the dataset). If there are not the only thing we can do
-     * is returning an error. */
+    //= server端打开maxmemory, 则尝试释放内存
     if (server.maxmemory) {
         int retval = freeMemoryIfNeeded();
+
         /* freeMemoryIfNeeded may flush slave output buffers. This may result
          * into a slave, that may be the active client, to be freed. */
         if (server.current_client == NULL) return C_ERR;
 
-        /* It was impossible to free enough memory, and the command the client
-         * is trying to execute is denied during OOM conditions? Error. */
-        if ((c->cmd->flags & CMD_DENYOOM) && retval == C_ERR) {
+        if (retval == C_ERR && (c->cmd->flags & CMD_DENYOOM)) {
+            //= 释放内存失败
             flagTransaction(c);
-            addReply(c, shared.oomerr);
+            addReply(c, shared.oomerr);  //= 返回oom
             return C_OK;
         }
     }
 
-    /* Don't accept write commands if there are problems persisting on disk
-     * and if this is a master instance. */
-    if (((server.stop_writes_on_bgsave_err &&
-          server.saveparamslen > 0 &&
-          server.lastbgsave_status == C_ERR) ||
-          server.aof_last_write_status == C_ERR) &&
-        server.masterhost == NULL &&
-        (c->cmd->flags & CMD_WRITE ||
-         c->cmd->proc == pingCommand))
-    {
-        flagTransaction(c);
-        if (server.aof_last_write_status == C_OK)
-            addReply(c, shared.bgsaveerr);
-        else
-            addReplySds(c,
-                sdscatprintf(sdsempty(),
-                "-MISCONF Errors writing to the AOF file: %s\r\n",
-                strerror(server.aof_last_write_errno)));
-        return C_OK;
+    //= masterServer持久化出现问题时, 不接收写操作
+    bool isBgsaveErr = server.stop_writes_on_bgsave_err && server.saveparamslen > 0 && server.lastbgsave_status == C_ERR;
+    if (isBgsaveErr || server.aof_last_write_status == C_ERR) {
+        if (server.masterhost == NULL) {  // 本server是master
+            if (c->cmd->flags & CMD_WRITE || c->cmd->proc == pingCommand) {
+                flagTransaction(c);
+                if (server.aof_last_write_status == C_OK) {
+                    addReply(c, shared.bgsaveerr);
+                }
+                else {
+                    sds e = sdscatprintf(sdsempty(),"-MISCONF Errors writing to the AOF file: %s\r\n",strerror(server.aof_last_write_errno));
+                    addReplySds(c, e);
+                }
+                return C_OK;
+            }
+        }
     }
 
-    /* Don't accept write commands if there are not enough good slaves and
-     * user configured the min-slaves-to-write option. */
+    //= 正常的slave数小于用户配置的min_slaves_to_write时, 不接收写操作
     if (server.masterhost == NULL &&
         server.repl_min_slaves_to_write &&
         server.repl_min_slaves_max_lag &&
@@ -2405,74 +2375,78 @@ int processCommand(client *c) {
         return C_OK;
     }
 
-    /* Don't accept write commands if this is a read only slave. But
-     * accept write commands if this is our master. */
-    if (server.masterhost && server.repl_slave_ro &&
-        !(c->flags & CLIENT_MASTER) &&
-        c->cmd->flags & CMD_WRITE)
+    //= 只读slaveServer不接收非masterServer的写操作
+    if (server.masterhost               // 本server是slave
+        && server.repl_slave_ro         // ro: readonly
+        && !(c->flags & CLIENT_MASTER)  // client不是masterServer
+        && c->cmd->flags & CMD_WRITE)
     {
         addReply(c, shared.roslaveerr);
         return C_OK;
     }
 
-    /* Only allow SUBSCRIBE and UNSUBSCRIBE in the context of Pub/Sub */
+    //= 处于pub/sub的client, 只处理其发布订阅相关的命令
     if (c->flags & CLIENT_PUBSUB &&
         c->cmd->proc != pingCommand &&
         c->cmd->proc != subscribeCommand &&
         c->cmd->proc != unsubscribeCommand &&
         c->cmd->proc != psubscribeCommand &&
-        c->cmd->proc != punsubscribeCommand) {
+        c->cmd->proc != punsubscribeCommand)
+    {
         addReplyError(c,"only (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT allowed in this context");
         return C_OK;
     }
 
-    /* Only allow INFO and SLAVEOF when slave-serve-stale-data is no and
-     * we are a slave with a broken link with master. */
-    if (server.masterhost && server.repl_state != REPL_STATE_CONNECTED &&
-        server.repl_serve_stale_data == 0 &&
-        !(c->cmd->flags & CMD_STALE))
+    //= 没有连上master的slaveServer, 只处理info和slaveof命令
+    if (server.masterhost
+        && server.repl_state != REPL_STATE_CONNECTED
+        && server.repl_serve_stale_data == 0
+        && !(c->cmd->flags & CMD_STALE))
     {
         flagTransaction(c);
         addReply(c, shared.masterdownerr);
         return C_OK;
     }
 
-    /* Loading DB? Return an error if the command has not the
-     * CMD_LOADING flag. */
-    if (server.loading && !(c->cmd->flags & CMD_LOADING)) {
+    //= server处于loading db时, 只处理cmd_loading命令
+    if (server.loading && !(c->cmd->flags & CMD_LOADING))
+    {
         addReply(c, shared.loadingerr);
         return C_OK;
     }
 
-    /* Lua script too slow? Only allow a limited number of commands. */
-    if (server.lua_timedout &&
-          c->cmd->proc != authCommand &&
-          c->cmd->proc != replconfCommand &&
-        !(c->cmd->proc == shutdownCommand &&
-          c->argc == 2 &&
-          tolower(((char*)c->argv[1]->ptr)[0]) == 'n') &&
-        !(c->cmd->proc == scriptCommand &&
-          c->argc == 2 &&
-          tolower(((char*)c->argv[1]->ptr)[0]) == 'k'))
+    //= lua脚本执行超时时, 只处理 shutdown nosave 和 script kill 命令
+    if (server.lua_timedout
+        && c->cmd->proc != authCommand
+        && c->cmd->proc != replconfCommand
+        && !(c->cmd->proc == shutdownCommand
+             && c->argc == 2 && tolower(((char*)c->argv[1]->ptr)[0]) == 'n')
+        && !(c->cmd->proc == scriptCommand
+             && c->argc == 2 && tolower(((char*)c->argv[1]->ptr)[0]) == 'k'))
     {
         flagTransaction(c);
         addReply(c, shared.slowscripterr);
         return C_OK;
     }
 
-    /* Exec the command */
-    if (c->flags & CLIENT_MULTI &&
-        c->cmd->proc != execCommand && c->cmd->proc != discardCommand &&
-        c->cmd->proc != multiCommand && c->cmd->proc != watchCommand)
+    //= 执行命令
+    if (c->flags & CLIENT_MULTI  // client正在执行事务
+        && c->cmd->proc != execCommand && c->cmd->proc != discardCommand
+        && c->cmd->proc != multiCommand && c->cmd->proc != watchCommand)
     {
+        // 事务中, exec discard multi watch外的命令放入队列中
         queueMultiCommand(c);
-        addReply(c,shared.queued);
-    } else {
-        call(c,CMD_CALL_FULL);
-        c->woff = server.master_repl_offset;
-        if (listLength(server.ready_keys))
-            handleClientsBlockedOnLists();
+        addReply(c, shared.queued);
     }
+    else
+    {
+        call(c, CMD_CALL_FULL);  //= to exec
+        c->woff = server.master_repl_offset;
+        if (listLength(server.ready_keys)) {
+            handleClientsBlockedOnLists();
+        }
+    }
+
     return C_OK;
 }
 

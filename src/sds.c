@@ -69,18 +69,7 @@ static inline char sdsReqType(size_t string_size) {
     return SDS_TYPE_64;
 }
 
-/* Create a new sds string with the content specified by the 'init' pointer
- * and 'initlen'.
- * If NULL is used for 'init' the string is initialized with zero bytes.
- *
- * The string is always null-termined (all the sds strings are, always) so
- * even if you create an sds string with:
- *
- * mystring = sdsnewlen("abc",3);
- *
- * You can print the string with printf() as there is an implicit \0 at the
- * end of the string. However the string is binary safe and can contain
- * \0 characters in the middle, as the length is stored in the sds header. */
+// 从init[0:initlen]创建新的sds
 sds sdsnewlen(const void *init, size_t initlen) {
     void *sh;
     sds s;
@@ -133,8 +122,10 @@ sds sdsnewlen(const void *init, size_t initlen) {
             break;
         }
     }
+
+    //= 把init copy到s上
     if (initlen && init)
-        memcpy(s, init, initlen);  //= 用init初始化s
+        memcpy(s, init, initlen);
     s[initlen] = '\0';
     return s;
 }
@@ -190,12 +181,7 @@ void sdsclear(sds s) {
     s[0] = '\0';
 }
 
-/* Enlarge the free space at the end of the sds string so that the caller
- * is sure that after calling this function can overwrite up to addlen
- * bytes after the end of the string, plus one more byte for nul term.
- *
- * Note: this does not change the *length* of the sds string as returned
- * by sdslen(), but only the free buffer space we have. */
+//= sds的扩容, addlen是增长size, 不会改变sds.len
 sds sdsMakeRoomFor(sds s, size_t addlen) {
     void *sh, *newsh;
     size_t avail = sdsavail(s);
@@ -203,7 +189,7 @@ sds sdsMakeRoomFor(sds s, size_t addlen) {
     char type, oldtype = s[-1] & SDS_TYPE_MASK;
     int hdrlen;
 
-    /* Return ASAP if there is enough space left. */
+    /* Return ASAP(as soon as possible) if there is enough space left. */
     if (avail >= addlen) return s;
 
     //= 增长策略
@@ -718,6 +704,10 @@ sds sdstrim(sds s, const char *cset) {
  * s = sdsnew("Hello World");
  * sdsrange(s,1,-1); => "ello World"
  */
+//= 把s变成s[start:(end+1)]
+//= if -len<end<0, end=len+end; if end<=-len, end=0
+//= if start>end, s become empty
+//= ->memmove()
 void sdsrange(sds s, int start, int end) {
     size_t newlen, len = sdslen(s);
 
@@ -730,7 +720,7 @@ void sdsrange(sds s, int start, int end) {
         end = len+end;
         if (end < 0) end = 0;
     }
-    newlen = (start > end) ? 0 : (end-start)+1;
+    newlen = (start > end) ? 0 : (end-start)+1;  // start:(end+1)
     if (newlen != 0) {
         if (start >= (signed)len) {
             newlen = 0;
@@ -938,15 +928,16 @@ int hex_digit_to_int(char c) {
  * quotes or closed quotes followed by non space characters
  * as in: "foo"bar or "foo'
  */
+//= 解析命令行, 得到(int argc, char** argv)
 sds *sdssplitargs(const char *line, int *argc) {
     const char *p = line;
     char *current = NULL;
-    char **vector = NULL;
+    char **vector = NULL;  // char** argv
 
     *argc = 0;
     while(1) {
-        /* skip blanks */
-        while(*p && isspace(*p)) p++;
+        while(*p && isspace(*p)) p++;  // 跳过空白字符
+
         if (*p) {
             /* get a token */
             int inq=0;  /* set to 1 if we are in "quotes" */
@@ -954,7 +945,7 @@ sds *sdssplitargs(const char *line, int *argc) {
             int done=0;
 
             if (current == NULL) current = sdsempty();
-            while(!done) {
+            while(done == 0) {
                 if (inq) {
                     if (*p == '\\' && *(p+1) == 'x' &&
                                              is_hex_digit(*(p+2)) &&

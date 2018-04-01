@@ -581,6 +581,8 @@ typedef struct RedisModuleDigest {
 #define LRU_CLOCK_RESOLUTION 1000 /* LRU clock resolution in ms */
 
 #define OBJ_SHARED_REFCOUNT INT_MAX
+
+//= robj
 typedef struct redisObject {
     unsigned type:4;
     unsigned encoding:4;
@@ -607,6 +609,7 @@ struct evictionPoolEntry; /* Defined in evict.c */
 /* Redis database representation. There are multiple databases identified
  * by integers from 0 (the default database) up to the max configured
  * database. The database number is the 'id' field in the structure. */
+//= dict.h
 typedef struct redisDb {
     dict *dict;                 /* The keyspace for this DB */
     dict *expires;              /* Timeout of keys with a timeout set */
@@ -682,9 +685,12 @@ typedef struct client {
                                yet not applied replication stream that we
                                are receiving from the master. */
     size_t querybuf_peak;   /* Recent (100ms or more) peak of querybuf size. */
+
     int argc;               /* Num of arguments of current command. */
     robj **argv;            /* Arguments of current command. */
-    struct redisCommand *cmd, *lastcmd;  /* Last command executed. */
+    redisCommand *cmd;
+    redisCommand *lastcmd;  /* Last command executed. */
+
     int reqtype;            /* Request protocol type: PROTO_REQ_* */
     int multibulklen;       /* Number of multi bulk arguments left to read. */
     long bulklen;           /* Length of bulk argument in multi bulk request. */
@@ -1208,20 +1214,27 @@ typedef struct pubsubPattern {
 
 typedef void redisCommandProc(client *c);
 typedef int *redisGetKeysProc(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);
+
+// @ref server.c::redisCommandTable
 struct redisCommand {
-    char *name;
-    redisCommandProc *proc;
-    int arity;
-    char *sflags; /* Flags as string representation, one char per flag. */
-    int flags;    /* The actual flags, obtained from the 'sflags' field. */
+    char *name;              // 命令名称
+    redisCommandProc *proc;  // 处理函数
+
+    int arity;  // 命令的参数个数(包括命令本身), 如"set k v"是-3, -3表示>=3
+
+    char *sflags;  // 字符串形式的flag, w:写, m:可能增加内存, "set"是wm
+    int flags;     // 实际的flag
+
     /* Use a function to determine keys arguments in a command line.
      * Used for Redis Cluster redirect. */
     redisGetKeysProc *getkeys_proc;
+
     /* What keys should be loaded in background when calling this command? */
     int firstkey; /* The first argument that's a key (0 = no keys) */
     int lastkey;  /* The last argument that's a key */
     int keystep;  /* The step between first and last key */
-    long long microseconds, calls;
+
+    long long microseconds, calls;  // 该命令执行的总用时, 以及执行次数
 };
 
 struct redisFunctionSym {
